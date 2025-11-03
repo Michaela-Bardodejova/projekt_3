@@ -16,15 +16,16 @@ from typing import List, Dict
 
 def content_pages(url: str) -> bs:
     """
-    Fetch the HTML content of a given URL with a timeout and return a BeautifulSoup object.
+    Fetch the HTML content of a given URL and return a BeautifulSoup object.
+
+    Args:
+        url (str): The URL of the web page to download.
+
+    Returns:
+        bs4.BeautifulSoup: Parsed HTML page.
     """
-    try:
-        page = requests.get(url, timeout=10)
-        page.raise_for_status()
-        return bs(page.text, features="html.parser")
-    except Exception as e:
-        print(f"Error downloading {url}: {e}")
-        return None
+    page = requests.get(url)
+    return bs(page.text, features="html.parser")
 
 
 def object_list(soup: bs, atribut_values: List[str]) -> List[str]:
@@ -125,125 +126,74 @@ def frist_line(web: str) -> List[str]:
         help_0.extend([element.get_text(strip=True) for element in soup.find_all("td", headers=value_atribut)])
     return help_0
 
-def check_args() -> tuple[str, str]:
-    """
-    Check command-line arguments and return web URL and CSV filename.
 
-    Returns:
-        Tuple[str, str]: web URL, CSV filename.
-    """
-    if len(sys.argv) != 3:
-        print("Usage: python main.py <URL> <output_file.csv>")
-        sys.exit(1)
-    web = sys.argv[1]
-    name_csv = sys.argv[2]
-    return web, name_csv
+# --- Script Execution ---
+web = sys.argv[1]
+name_csv = sys.argv[2]
+soup = content_pages(web)
 
-def validate_web(web: str) -> bool:
-    """
-    Validate that the provided web URL is on the main election page.
-
-    Args:
-        web (str): Web URL to check.
-
-    Returns:
-        bool: True if URL is valid, False otherwise.
-    """
-    main_soup = content_pages("https://www.volby.cz/pls/ps2017nss/ps3?xjazyk=CZ")
-    t_sa3_list = web_list(main_soup, "t_sa3")
-    return web in t_sa3_list
-
-def process_web1(web1: str, data_code_item: str, data_location_item: str) -> List[str]:
-    """
-    Process a single web page, fetch linked pages in parallel if needed,
-    and extract election data.
-
-    Args:
-        web1 (str): URL of the web page to process.
-        data_code_item (str): Code value for this row.
-        data_location_item (str): Location value for this row.
-
-    Returns:
-        List[str]: Extracted data for this row.
-    """
-    soup1 = content_pages(web1)
-    help_if = object_list(soup1, ["sa2"])
-
-    help_3 = [data_code_item, data_location_item]
-
-    if len(help_if) == 0:
-        help_1 = []
-        cross_list = web_list(soup1, "s1")
-
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_url = {executor.submit(content_pages, url): url for url in cross_list}
-            results = {}
-            for future in as_completed(future_to_url):
-                url = future_to_url[future]
-                try:
-                    results[url] = future.result(timeout=15)
-                except Exception as e:
-                    print(f" Failed {url}: {e}")
-                    results[url] = None
-
-        for web_cross in cross_list:
-            soup2 = results[web_cross]
-            if soup2 is None:
-                continue
-            help_2 = object_list(soup2, ["sa2", "sa3", "sa6", "t_sa2 t_sb3"])
-
-            # spojování s předchozími hodnotami
-            if help_1:
-                for i in range(len(help_1)):
-                    if help_2[i] != "-":
-                        try:
-                            help_1[i] = int(help_2[i]) + int(help_1[i])
-                        except ValueError:
-                            help_1[i] = int(help_2[i].replace("\xa0","")) + int(str(help_1[i]).replace("\xa0",""))
-            else:
-                help_1 = help_2
-
-        help_3.extend(help_1)
-    else:
-        help_3.extend(object_list(soup1, ["sa2", "sa3", "sa6", "t_sa2 t_sb3"]))
-
-    return help_3
-
-def process_all_webs(web: str, name_csv: str) -> None:
-    """
-    Process all main web pages, collect election data, and write to CSV.
-
-    Args:
-        web (str): Main web URL to process.
-        name_csv (str): Output CSV filename.
-    """
-    soup = content_pages(web)
+if len(sys.argv) != 3:
+    print("Usage: python main.py <URL> <output_file.csv>")
+    sys.exit(1)
+if web in web_list(content_pages("https://www.volby.cz/pls/ps2017nss/ps3?xjazyk=CZ"), "t_sa3"):
+    print("The script is running.")
     data_code = object_list(soup, ["t_sa1 t_sb1"])
     data_location = object_list(soup, ["t_sa1 t_sb2"])
     webs = web_list(soup, "t_sa2")
-
+    memory_count = 0
+    len_webs = len(webs)
     data = []
-    for i, web1 in enumerate(webs):
-        help_3 = process_web1(web1, data_code[i], data_location[i])
-        print(f"I have {i+1} out of {len(webs)} parts ready.")
+
+    for web1 in webs:
+        soup1 = content_pages(web1)
+        help_3 = [data_code[memory_count], data_location[memory_count]]
+        help_if = object_list(soup1, ["sa2"])
+        memory_count += 1
+
+        if len(help_if) == 0:
+            help_1 = []
+            cross_list = web_list(soup1, "s1")
+
+            # Parallel downloading
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                future_to_url = {executor.submit(content_pages, web_cross): web_cross for web_cross in cross_list}
+                results: Dict[str, bs] = {}
+                for future in as_completed(future_to_url):
+                    url = future_to_url[future]
+                    results[url] = future.result()
+
+            for web_cross in cross_list:
+                soup2 = results[web_cross]
+                help_2 = object_list(soup2, ["sa2", "sa3", "sa6", "t_sa2 t_sb3"])
+
+                if len(help_1) != 0:
+                    for index in range(len(help_1)):
+                        if help_2[index] != "-":
+                            try:
+                                help_1[index] = int(help_2[index]) + int(help_1[index])
+                            except ValueError:
+                                if isinstance(help_1[index], str):
+                                    help_1[index] = int(help_2[index].replace("\xa0", "")) + int(help_1[index].replace("\xa0", ""))
+                                else:
+                                    help_1[index] = int(help_2[index].replace("\xa0", "")) + int(help_1[index])
+                else:
+                    help_1 = help_2
+
+            help_3.extend(help_1)
+
+        else:
+            help_3.extend(object_list(soup1, ["sa2", "sa3", "sa6", "t_sa2 t_sb3"]))
+
+        print(f"I have {memory_count} out of {len_webs} parts ready.")
         data.append(help_3)
 
-    data.insert(0, frist_line(webs[0]))
+    data.insert(0, frist_line(cross_list[0]))
     writer_csv(data, name_csv)
     print("CSV file is ready.")
+else:
+    print(f"""
 
-def main():
-    """
-    Main function: checks arguments, validates web URL,
-    and processes all pages.
-    """
-    web, name_csv = check_args()
+Your web address {web}
+or CSV file name {name_csv} is incorrect.
 
-    if validate_web(web):
-        print("The script is running.")
-        process_all_webs(web, name_csv)
-    else:
-        print(f"\nYour web address {web} or CSV file name {name_csv} is incorrect.\n")
-
-if __name__ == "__main__":
-    main()
+""")
