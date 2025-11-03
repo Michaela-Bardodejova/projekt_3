@@ -192,7 +192,6 @@ def process_web1(web1: str, data_code_item: str, data_location_item: str) -> Lis
                 continue
             help_2 = object_list(soup2, ["sa2", "sa3", "sa6", "t_sa2 t_sb3"])
 
-            # spojování s předchozími hodnotami
             if help_1:
                 for i in range(len(help_1)):
                     if help_2[i] != "-":
